@@ -1,39 +1,36 @@
 _base_ = [
-    '../_base_/datasets/coco_instance.py',
+    '../_base_/datasets/coco_detection.py',
     '../_base_/default_runtime.py'
 ]
 checkpoint_config = dict(interval=1)
 resume_from = None
-load_from = None
+load_from = "pytorch_model.pth"
 pretrained = None
 window_block_indexes = (
-    list(range(0, 2)) + list(range(3, 5)) + list(range(6, 8)) + list(range(9, 11)) + list(range(12, 14)) + list(range(15, 17)) + list(range(18, 20)) + list(range(21, 23))
-)
+    list(range(0, 3)) + list(range(4, 7)) + list(range(8, 11)) + list(range(12, 15)) + list(range(16, 19)) +
+    list(range(20, 23)) + list(range(24, 27)))
 residual_block_indexes = []
-optimizer_config = dict(grad_clip=dict(max_norm=0.1, norm_type=2))
 
 num_dec_layer = 6
 lambda_2 = 2.0
 
 model = dict(
     type='CoDETR',
-    with_attn_mask=False,
     backbone=dict(
         type='ViT',
-        img_size=640,
+        img_size=1536,
         pretrain_img_size=512,
         patch_size=16,
         embed_dim=1024,
         depth=24,
         num_heads=16,
         mlp_ratio=4*2/3,
-        drop_path_rate=0.3,
-        window_size=16,
+        drop_path_rate=0.4,
+        window_size=24,
         window_block_indexes=window_block_indexes,
         residual_block_indexes=residual_block_indexes,
         qkv_bias=True,
         use_act_checkpoint=True,
-        use_lsj=True,
         init_cfg=None),
     neck=dict(        
         type='SFP',
@@ -80,11 +77,11 @@ model = dict(
         fusion_type='MultiBranchFusionAvg', # slighly better than w/o global avg feature
         dilations=[1, 3, 5],
         semantic_out_stride=4,
-        stage_num_classes=[8, 8, 8, 1],  # use class-agnostic classifier in the last stage
+        stage_num_classes=[80, 80, 80, 1],  # use class-agnostic classifier in the last stage
         stage_sup_size=[14, 28, 56, 112],
         pre_upsample_last_stage=False,      # compute logits and then upsample them in the last stage
         upsample_cfg=dict(type='bilinear', scale_factor=2),
-        loss_weight=1.0 * num_dec_layer * lambda_2,
+        loss_weight=1.33 * num_dec_layer * lambda_2,
         loss_cfg=dict(
             type='BARCrossEntropyLoss',
             stage_instance_loss_weight=[0.5, 0.75, 0.75, 1.0],
@@ -101,10 +98,10 @@ model = dict(
         num_classes=8,
         score_use_sigmoid=True,
         norm_cfg=dict(type='LN2d'),
-        loss_iou=dict(type='MSELoss', loss_weight=0.5 * num_dec_layer * lambda_2)),        
+        loss_iou=dict(type='MSELoss', loss_weight=0.5 * num_dec_layer * lambda_2)),
     query_head=dict(
         type='CoDINOHead',
-        num_query=900,
+        num_query=1500,
         num_classes=8,
         num_feature_levels=5,
         in_channels=2048,
@@ -176,17 +173,21 @@ model = dict(
             featmap_strides=[4, 8, 16, 32, 64],
             finest_scale=56),
         bbox_head=dict(
-            type='Shared2FCBBoxHead',
+            type='ConvFCBBoxHead',
+            num_shared_convs=4,
+            num_shared_fcs=1,
             in_channels=256,
+            conv_out_channels=256,
             fc_out_channels=1024,
             roi_feat_size=7,
             num_classes=8,
             bbox_coder=dict(
                 type='DeltaXYWHBBoxCoder',
                 target_means=[0., 0., 0., 0.],
-                target_stds=[0.1, 0.1, 0.2, 0.2]),
-            reg_class_agnostic=False,
+                target_stds=[0.05, 0.05, 0.1, 0.1]),
+            reg_class_agnostic=True,
             reg_decoded_bbox=True,
+            norm_cfg=dict(type='GN', num_groups=32),
             loss_cls=dict(
                 type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0 * num_dec_layer * lambda_2),
             loss_bbox=dict(type='GIoULoss', loss_weight=10.0 * num_dec_layer * lambda_2)))],
@@ -288,12 +289,13 @@ model = dict(
     test_cfg=[
         dict(
             max_per_img=1000,
-            nms=dict(type='soft_nms', iou_threshold=0.8)),
+            nms=dict(type='soft_nms', iou_threshold=0.8),
+            mask_thr_binary=0.5),
         dict(
             score_thr=0.0,
             nms=dict(type='nms', iou_threshold=0.5),
             mask_thr_binary=0.5,
-            max_per_img=100),            
+            max_per_img=1000),
         dict(
             rpn=dict(
                 nms_pre=8000,
@@ -361,14 +363,6 @@ test_pipeline = [
             dict(type='Collect', keys=['img'])
         ])
 ]
-
-# data = dict(
-#     samples_per_gpu=1,
-#     workers_per_gpu=1,
-    
-#     train=dict(filter_empty_gt=False, pipeline=train_pipeline),
-#     val=dict(pipeline=test_pipeline),
-#     test=dict(pipeline=test_pipeline))
 data_root = 'train/'
 dataset_type = 'CocoDataset'
 data = dict(
@@ -378,14 +372,19 @@ data = dict(
         type='MultiImageMixDataset',
         dataset=dict(
             type=dataset_type,
-            ann_file=data_root + 'train_annotations.json',
+            ann_file=data_root + 'train.json',
             img_prefix=data_root + 'images/',
             filter_empty_gt=False,
             pipeline=load_pipeline),
         pipeline=train_pipeline),
     val=dict(pipeline=test_pipeline),
     test=dict(pipeline=test_pipeline))
-
+# data = dict(
+#     samples_per_gpu=1,
+#     workers_per_gpu=1,
+#     train=dict(filter_empty_gt=False, pipeline=train_pipeline),
+#     val=dict(pipeline=test_pipeline),
+#     test=dict(pipeline=test_pipeline))
 evaluation = dict(metric=['bbox', 'segm'])
 
 # learning policy
@@ -394,15 +393,33 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=500,
     warmup_ratio=0.01,
-    step=[9, 15])
-runner = dict(type='EpochBasedRunner', max_epochs=16)
+    step=[7])
+runner = dict(type='EpochBasedRunner', max_epochs=12)
 
 # optimizer
 # We use layer-wise learning rate decay, but it has not been implemented.
+# optimizer = dict(
+#     type='AdamW',
+#     lr=5e-5,
+#     weight_decay=0.01,
+#     constructor='LayerDecayOptimizerConstructor',
+#     paramwise_cfg=dict(
+#         num_layers=24, layer_decay_rate=0.8))
+
+optimizer_config = dict(grad_clip=dict(max_norm=0.1, norm_type=2))
 optimizer = dict(
     type='AdamW',
     lr=5e-5,
-    weight_decay=0.05,
-    # custom_keys of sampling_offsets and reference_points in DeformDETR
-    paramwise_cfg=dict(custom_keys={'backbone': dict(lr_mult=0.1)}))
+    weight_decay=0.01,
+    constructor='LayerDecayOptimizerConstructor',
+    paramwise_cfg=dict(
+        num_layers=24, layer_decay_rate=0.8))
+
+custom_hooks = [
+    dict(
+        type='ExpMomentumEMAHook',
+        momentum=0.0001,
+        priority=49),]
+
+evaluation = dict(metric=['bbox', 'segm'])
 

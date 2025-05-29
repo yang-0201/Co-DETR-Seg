@@ -714,6 +714,8 @@ class LVISV1Dataset(LVISDataset):
         'wineglass', 'blinder_(for_horses)', 'wok', 'wolf', 'wooden_spoon',
         'wreath', 'wrench', 'wristband', 'wristlet', 'yacht', 'yogurt',
         'yoke_(animal_equipment)', 'zebra', 'zucchini')
+    
+    CLASSES = ("storage_tank", "vehicle", "aircraft", "ship", "bridge", "sports_facility", "roundabout", "harbor")
 
     def load_annotations(self, ann_file):
         try:
